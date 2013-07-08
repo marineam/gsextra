@@ -1,0 +1,128 @@
+#!/usr/bin/python
+#
+# Copyright 2013 The CoreOS Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""gsindex"""
+
+import cgi
+import sys
+import optparse
+import urllib
+import tempfile
+
+import boto
+from boto.gs.key import Key as GsKey
+
+# Import the gsutil oauth plugin which will be used by boto automatically
+import gslib.third_party.oauth2_plugin.oauth2_plugin
+
+
+INDEX_HEAD = """<html>
+<head>
+    <title>%s</title>
+</head>
+<body>
+<h1>%s</h1>
+"""
+
+INDEX_FOOT = """</body>
+</html>
+"""
+
+
+
+class IndexgeneratorError(Exception):
+    """Error for IndexGenerator."""
+
+class IndexGenerator(object):
+
+    delimiter = '/'
+
+    def __init__(self, uri):
+        if isinstance(uri, str):
+            self.uri = boto.storage_uri(uri)
+        else:
+            self.uri = uri
+
+    def keys(self):
+        if self.uri.is_file_uri():
+            # file:// bucket objects don't provide list()
+            keys = self.uri.get_all_keys(prefix=self.uri.object_name,
+                                          delimiter=self.delimiter)
+        else:
+            keys = self.uri.list_bucket(prefix=self.uri.object_name,
+                                         delimiter=self.delimiter)
+        for key in keys:
+            yield key
+
+    def links(self):
+        for key in self.keys():
+            rel_name = key.name[len(self.uri.object_name):].lstrip('/')
+            href = urllib.quote(rel_name)
+            desc = cgi.escape(rel_name)
+            if isinstance(key, GsKey):
+                yield '[file] <a href="%s">%s</a>' % (href, desc)
+            else:
+                yield '[dir] <a href="%s">%s</a>' % (href, desc)
+
+    def write_index(self, recursive=True):
+        title = cgi.escape(self.uri.uri)
+        index = tempfile.TemporaryFile()
+        index.write(INDEX_HEAD % (title, title))
+        for link in self.links():
+            index.write('%s <br />\n' % (link,))
+        index.write(INDEX_FOOT)
+
+        bucket = self.uri.get_bucket()
+        index_name = 'index.html'
+        if self.uri.object_name:
+            index_name = '%s/index.html' % (self.uri.object_name.strip('/'),)
+        print 'writing %s' % (index_name,)
+        index_key = bucket.new_key(index_name)
+        index_key.set_contents_from_file(
+                index,
+                headers = {'Content-Type': 'text/html'},
+                rewind = True)
+
+        index.close()
+
+        if recursive:
+            self.write_subdir_indexes(recursive=True)
+
+    def write_subdir_indexes(self, recursive=True):
+        for key in self.keys():
+            if isinstance(key, GsKey):
+                continue
+            uri = self.uri.clone_replace_name(key.name)
+            subdir = self.__class__(uri)
+            subdir.write_index(recursive=recursive)
+
+def main(argv):
+    parser = optparse.OptionParser('%prog [options] gs://bucket [gs://...]')
+    # parser....
+    parser.add_option('-R', '--recursive', action='store_false', default=True,
+            help='Recursively generate indexes for all subdirectories')
+    opts, args = parser.parse_args()
+
+    if not args:
+        parser.error('No URIs provided')
+
+    for arg in args:
+        igen = IndexGenerator(arg)
+        igen.write_index(recursive=opts.recursive)
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv))
