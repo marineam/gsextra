@@ -110,9 +110,15 @@ class IndexGenerator(object):
             subdir.write_index(recursive=recursive)
 
 def main(argv):
+    import gslib.util
+    from gslib.third_party.oauth2_plugin import oauth2_client
+    if gslib.util.MultiprocessingIsAvailable()[0]:
+        gslib.util.InitializeMultiprocessingVariables()
+    oauth2_client.InitializeMultiprocessingVariables()
+
     parser = optparse.OptionParser('%prog [options] gs://bucket [gs://...]')
     # parser....
-    parser.add_option('-R', '--recursive', action='store_false', default=True,
+    parser.add_option('-R', '--recursive', action='store_true', default=False,
             help='Recursively generate indexes for all subdirectories')
     opts, args = parser.parse_args()
 
