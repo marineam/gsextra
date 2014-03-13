@@ -19,6 +19,7 @@
 import cgi
 import sys
 import optparse
+import os
 import urllib
 import tempfile
 
@@ -77,7 +78,7 @@ class IndexGenerator(object):
             else:
                 yield '[dir] <a href="%s">%s</a>' % (href, desc)
 
-    def write_index(self, recursive=True):
+    def write_index(self, recursive=True, exclude=()):
         title = cgi.escape(self.uri.uri)
         index = tempfile.TemporaryFile()
         index.write(INDEX_HEAD % (title, title))
@@ -99,15 +100,17 @@ class IndexGenerator(object):
         index.close()
 
         if recursive:
-            self.write_subdir_indexes(recursive=True)
+            self.write_subdir_indexes(recursive=True, exclude=exclude)
 
-    def write_subdir_indexes(self, recursive=True):
+    def write_subdir_indexes(self, recursive=True, exclude=()):
         for key in self.keys():
             if isinstance(key, GsKey):
                 continue
             uri = self.uri.clone_replace_name(key.name)
+            if os.path.basename(uri.object_name.strip('/')) in exclude:
+                continue
             subdir = self.__class__(uri)
-            subdir.write_index(recursive=recursive)
+            subdir.write_index(recursive=recursive, exclude=exclude)
 
 def main(argv):
     import gslib.util
@@ -120,6 +123,8 @@ def main(argv):
     # parser....
     parser.add_option('-R', '--recursive', action='store_true', default=False,
             help='Recursively generate indexes for all subdirectories')
+    parser.add_option('-e', '--exclude', action='append', default=[],
+            help='Skip directory when recursively updating')
     opts, args = parser.parse_args()
 
     if not args:
@@ -127,7 +132,7 @@ def main(argv):
 
     for arg in args:
         igen = IndexGenerator(arg)
-        igen.write_index(recursive=opts.recursive)
+        igen.write_index(recursive=opts.recursive, exclude=opts.exclude)
 
 
 if __name__ == '__main__':
